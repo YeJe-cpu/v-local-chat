@@ -1,20 +1,14 @@
 <p align="center">
-  <img src="assets/wechat-logo.png" width="200" alt="v-local-chat">
+  <img src="assets/wechat-logo.png" width="260" alt="v-local-chat">
 </p>
-
 <h1 align="center">v-local-chat · 本地聊天分析面板</h1>
-
 <p align="center">面向 macOS 微信（最新版实测可用），把群聊私聊一键整理成好读的日报、精华与素材。</p>
-
 <p align="center">全程本地运行 · 不上传 · 不联网 · 不接任何第三方 API</p>
-
 <p align="center">
   <a href="README.en.md">English</a> ·
   <a href="docs/01-获取密钥-指引.md">获取密钥指引</a> ·
   <a href="docs/03-分析防踩坑.md">分析防踩坑</a>
 </p>
-
-<br>
 
 ## 先看效果
 
