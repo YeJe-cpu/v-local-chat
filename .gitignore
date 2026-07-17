@@ -1,0 +1,23 @@
+# 隐私：绝不提交任何真实数据/密钥/明文库
+*.db
+*.db-shm
+*.db-wal
+*.sqlite*
+wechat-keys.json
+*.key
+decrypted/
+vault/
+exports/
+output/
+assets/*.png
+assets/*.jpg
+!assets/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# macOS
+.DS_Store

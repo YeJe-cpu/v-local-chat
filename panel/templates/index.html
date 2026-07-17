@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat Digest — 本地聊天分析面板</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f0; color: #333; min-height: 100vh; }
+
+.layout { display: flex; min-height: 100vh; }
+/* sticky + align-self:flex-start：flex 子元素默认被拉伸到与内容等高，那样 sticky 无效；
+   限定为视口高度后才能在长结果里跟随滚动。内容超高时侧栏自身可滚。 */
+.sidebar { width: 220px; background: #faf9f6; border-right: 1px solid #e5e2db; padding: 24px 16px; flex-shrink: 0; display: flex; flex-direction: column; position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow-y: auto; }
+.sidebar h1 { font-size: 16px; color: #5a7a3a; margin-bottom: 4px; letter-spacing: 1px; }
+.sidebar .subtitle { font-size: 12px; color: #999; margin-bottom: 32px; }
+.nav-item { display: block; padding: 10px 14px; margin-bottom: 4px; border-radius: 8px; cursor: pointer; font-size: 14px; color: #555; transition: all 0.15s; border: none; background: none; width: 100%; text-align: left; }
+.nav-item:hover { background: #f0ede6; }
+.nav-item.active { background: #e8e4d9; color: #333; font-weight: 600; }
+
+.main { flex: 1; padding: 32px 40px; max-width: 1100px; }
+.page-title { font-size: 22px; font-weight: 600; margin-bottom: 6px; color: #333; }
+.page-desc { font-size: 13px; color: #888; margin-bottom: 24px; }
+
+.controls { margin-bottom: 24px; }
+.control-row { display: flex; gap: 12px; align-items: flex-end; margin-bottom: 12px; flex-wrap: wrap; }
+.control-group { display: flex; flex-direction: column; gap: 4px; }
+.control-group label { font-size: 12px; color: #888; font-weight: 500; }
+.control-group input[type="date"] { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; background: white; }
+
+.tag-input-wrap { position: relative; flex: 1; min-width: 300px; }
+.tag-input-box { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; background: white; min-height: 37px; align-items: center; cursor: text; }
+.tag-input-box:focus-within { border-color: #5a7a3a; box-shadow: 0 0 0 2px rgba(90,122,58,0.15); }
+.tag-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; background: #e8f0de; color: #3a5a2a; border-radius: 14px; font-size: 13px; white-space: nowrap; }
+.tag-chip.group { background: #e0eaf5; color: #2a4a6a; }
+.tag-chip .remove { cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.6; margin-left: 2px; }
+.tag-chip .remove:hover { opacity: 1; }
+.img-thumb-hint { display: inline-block; padding: 6px 12px; background: #f5f0e8; color: #8a7a5a; border-radius: 6px; font-size: 12px; border: 1px dashed #d4c9a8; margin: 4px 0; }
+.video-wrap { position: relative; display: inline-block; cursor: pointer; margin: 4px 0; }
+.video-wrap .video-play { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 44px; height: 44px; line-height: 44px; text-align: center; background: rgba(0,0,0,.55); color: #fff; border-radius: 50%; font-size: 18px; pointer-events: none; }
+.img-thumb-banner { padding: 10px 14px; background: #fdf8ed; color: #6a5a2a; border: 1px solid #e8d9a8; border-radius: 8px; font-size: 13px; line-height: 1.6; margin: 8px 0 12px; }
+.tag-input { border: none; outline: none; font-size: 14px; flex: 1; min-width: 120px; background: transparent; }
+.tag-input::placeholder { color: #bbb; }
+
+.search-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #ddd; border-top: none; border-radius: 0 0 6px 6px; max-height: 240px; overflow-y: auto; z-index: 100; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: none; }
+.search-dropdown.visible { display: block; }
+.search-item { padding: 8px 14px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+.search-item:hover, .search-item.highlighted { background: #f5f5f0; }
+.search-item .type-badge { font-size: 11px; padding: 1px 6px; border-radius: 8px; }
+.search-item .type-badge.group { background: #e0eaf5; color: #2a4a6a; }
+.search-item .type-badge.contact { background: #e8f0de; color: #3a5a2a; }
+
+.btn-run { padding: 8px 24px; background: #5a7a3a; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 500; height: 37px; }
+.btn-run:hover { background: #4a6a2a; }
+.btn-run:disabled { background: #ccc; cursor: not-allowed; }
+.btn-download { padding: 6px 16px; background: #f0ede6; color: #555; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.btn-download:hover { background: #e8e4d9; }
+
+.stats-row { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+.stat-card { background: white; border: 1px solid #e5e2db; border-radius: 10px; padding: 16px 20px; min-width: 150px; flex: 1; }
+.stat-label { font-size: 12px; color: #5a7a3a; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-value { font-size: 28px; font-weight: 700; color: #333; margin-top: 4px; }
+
+.result-section { background: white; border: 1px solid #e5e2db; border-radius: 10px; padding: 20px 24px; margin-bottom: 16px; }
+.section-title { font-size: 15px; font-weight: 600; color: #333; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0; }
+
+.message-list { max-height: 500px; overflow-y: auto; }
+.message-item { padding: 8px 0; border-bottom: 1px solid #f8f8f5; font-size: 13px; line-height: 1.6; }
+.message-item .sender { color: #5a7a3a; font-weight: 600; }
+.message-item .time { color: #bbb; font-size: 11px; margin-left: 8px; }
+
+.person-block { border-left: 3px solid #5a7a3a; padding: 12px 16px; margin-bottom: 14px; background: #fcfcfa; border-radius: 0 8px 8px 0; }
+.person-block .block-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px; cursor: pointer; }
+.person-block .block-sender { font-weight: 700; color: #333; font-size: 14px; }
+.person-block .block-meta { font-size: 12px; color: #999; }
+.person-block .block-msgs { font-size: 13px; line-height: 1.7; color: #444; max-height: 300px; overflow-y: auto; }
+.person-block .block-msgs .msg-line { padding: 3px 0; border-bottom: 1px solid #f5f5f0; }
+.person-block .block-msgs .msg-time { color: #bbb; font-size: 11px; margin-right: 6px; }
+
+.material-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+.material-card { border: 1px solid #e5e2db; border-radius: 12px; padding: 16px; background: white; display: flex; flex-direction: column; }
+.material-card .card-header { font-weight: 600; font-size: 13px; color: #333; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0; }
+.material-card .card-header .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-left: 6px; }
+.material-card .card-header .badge-img { background: #e0eaf5; color: #2a4a6a; }
+.material-card .card-header .badge-text { background: #e8f0de; color: #3a5a2a; }
+.material-card .card-body { font-size: 13px; line-height: 1.7; color: #444; white-space: pre-wrap; word-break: break-word; }
+.material-card .card-body .img-placeholder { display: inline-block; padding: 6px 12px; background: #f0f0f0; border-radius: 6px; margin: 4px 0; color: #888; font-size: 12px; }
+
+.round-block { margin-bottom: 20px; }
+.round-divider { display: flex; align-items: center; gap: 12px; margin: 16px 0 10px; color: #bbb; font-size: 12px; }
+.round-divider::before, .round-divider::after { content: ''; flex: 1; height: 1px; background: #e5e2db; }
+.unreplied-badge { display: inline-block; background: #fff0e6; color: #c65d00; font-size: 11px; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+
+.link-table, .file-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.link-table th, .file-table th { text-align: left; padding: 8px 12px; background: #faf9f6; color: #888; font-weight: 500; font-size: 12px; border-bottom: 1px solid #e5e2db; }
+.link-table td, .file-table td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
+.link-table a { color: #5a7a3a; text-decoration: none; word-break: break-all; }
+.link-table a:hover { text-decoration: underline; }
+
+.tag { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-right: 4px; }
+.tag-hongbao { background: #fff0e6; color: #c65d00; }
+.tag-share { background: #e6f7e6; color: #3a7a3a; }
+
+.sender-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.sender-bar .name { font-size: 13px; min-width: 120px; }
+.sender-bar .bar { height: 18px; background: #e8e4d9; border-radius: 4px; transition: width 0.3s; }
+.sender-bar .count { font-size: 12px; color: #999; }
+
+.daily-bar { display: flex; align-items: flex-end; gap: 3px; height: 80px; margin-top: 8px; }
+.daily-col { display: flex; flex-direction: column; align-items: center; flex: 1; }
+.daily-col .bar { background: #5a7a3a; border-radius: 2px 2px 0 0; width: 100%; min-width: 8px; max-width: 30px; transition: height 0.3s; }
+.daily-col .label { font-size: 9px; color: #bbb; margin-top: 4px; writing-mode: vertical-lr; }
+
+.loading { text-align: center; padding: 40px; color: #999; }
+.empty { text-align: center; padding: 40px; color: #ccc; font-size: 14px; }
+.hidden { display: none; }
+.reply-quote { font-size: 12px; color: #999; border-left: 2px solid #d8d4cc; padding: 1px 0 1px 7px; margin: 2px 0 3px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 460px; }
+.reply-quote .rq-name { color: #7a8a5a; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+.disconnect-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 9999; background: #c44; color: white; text-align: center; padding: 10px 16px; font-size: 14px; display: none; }
+.disconnect-banner.visible { display: block; }
+.disconnect-banner a { color: #ffd; text-decoration: underline; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="disconnect-banner" class="disconnect-banner">
+  服务器已断开连接 — 请在终端运行 <code>./start.sh</code> 重启面板，然后 <a onclick="location.reload()">刷新页面</a>
+</div>
+<div class="layout">
+  <div class="sidebar">
+    <h1>CHAT DIGEST</h1>
+    <div class="subtitle">本地聊天分析面板</div>
+    <button class="nav-item active" data-tab="group-digest" onclick="switchTab('group-digest', this)">群聊精华</button>
+    <button class="nav-item" data-tab="material-extract" onclick="switchTab('material-extract', this)">素材提取</button>
+    <button class="nav-item" data-tab="info-export" onclick="switchTab('info-export', this)">信息导出</button>
+    <div style="flex:1"></div>
+    <button id="sync-btn" onclick="syncData()" style="margin:12px 16px;padding:8px 12px;background:#5a7a3a;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px">同步最新数据</button>
+    <div id="sync-status" style="padding:0 16px 12px;font-size:12px;color:#999"></div>
+  </div>
+
+  <div class="main">
+    <!-- 群聊精华 -->
+    <div id="tab-group-digest" class="tab-content active">
+      <div class="page-title">群聊精华</div>
+      <div class="page-desc">提取群聊中的干货分享、链接推广和关键讨论，支持同时选择多个群聊</div>
+      <div class="controls">
+        <div class="control-row">
+          <div class="control-group tag-input-wrap" id="gd-wrap">
+            <label>搜索并添加群聊</label>
+            <div class="tag-input-box" onclick="this.querySelector('.tag-input').focus()">
+              <input class="tag-input" placeholder="输入群名搜索..." data-scope="gd" oninput="onSearchInput(this)" onfocus="onSearchInput(this)" onkeydown="onSearchKeydown(event, this)">
+            </div>
+            <div class="search-dropdown" id="gd-dropdown"></div>
+          </div>
+        </div>
+        <div class="control-row">
+          <div class="control-group">
+            <label>开始日期</label>
+            <input type="date" id="gd-start">
+          </div>
+          <div class="control-group">
+            <label>结束日期</label>
+            <input type="date" id="gd-end">
+          </div>
+          <button class="btn-run" id="gd-run" onclick="runGroupDigest()">运行</button>
+          <button class="btn-download hidden" id="gd-download" onclick="downloadReport('group-digest')">下载 Markdown</button>
+        </div>
+      </div>
+      <div id="gd-results"></div>
+    </div>
+
+    <!-- 素材提取 -->
+    <div id="tab-material-extract" class="tab-content">
+      <div class="page-title">素材提取</div>
+      <div class="page-desc">提取群聊或私聊中的文件、图片、链接等素材</div>
+      <div class="controls">
+        <div class="control-row">
+          <div class="control-group tag-input-wrap" id="me-wrap">
+            <label>搜索并添加群聊或联系人</label>
+            <div class="tag-input-box" onclick="this.querySelector('.tag-input').focus()">
+              <input class="tag-input" placeholder="输入群名或联系人搜索..." data-scope="me" oninput="onSearchInput(this)" onfocus="onSearchInput(this)" onkeydown="onSearchKeydown(event, this)">
+            </div>
+            <div class="search-dropdown" id="me-dropdown"></div>
+          </div>
+        </div>
+        <div class="control-row">
+          <div class="control-group">
+            <label>开始日期</label>
+            <input type="date" id="me-start">
+          </div>
+          <div class="control-group">
+            <label>结束日期</label>
+            <input type="date" id="me-end">
+          </div>
+          <button class="btn-run" id="me-run" onclick="runMaterialExtract()">运行</button>
+          <button class="btn-download hidden" id="me-download" onclick="downloadReport('material-extract')">下载 Markdown</button>
+          <button class="btn-download hidden" id="me-export-folder" onclick="exportMaterialToFolder()">导出到文件夹（含图片）</button>
+        </div>
+      </div>
+      <div id="me-results"></div>
+    </div>
+
+    <!-- 信息导出 -->
+    <div id="tab-info-export" class="tab-content">
+      <div class="page-title">信息导出</div>
+      <div class="page-desc">导出群聊或私聊的原始记录，支持混选多个目标，按目标分区展示</div>
+      <div class="controls">
+        <div class="control-row">
+          <div class="control-group tag-input-wrap" id="ie-wrap">
+            <label>搜索并添加群聊或联系人</label>
+            <div class="tag-input-box" onclick="this.querySelector('.tag-input').focus()">
+              <input class="tag-input" placeholder="输入群名或联系人搜索..." data-scope="ie" oninput="onSearchInput(this)" onfocus="onSearchInput(this)" onkeydown="onSearchKeydown(event, this)">
+            </div>
+            <div class="search-dropdown" id="ie-dropdown"></div>
+          </div>
+        </div>
+        <div class="control-row">
+          <div class="control-group">
+            <label>开始日期</label>
+            <input type="date" id="ie-start">
+          </div>
+          <div class="control-group">
+            <label>结束日期</label>
+            <input type="date" id="ie-end">
+          </div>
+          <button class="btn-run" id="ie-run" onclick="runInfoExport()">运行</button>
+          <button class="btn-download hidden" id="ie-download" onclick="downloadReport('info-export')">下载 Markdown</button>
+        </div>
+      </div>
+      <div id="ie-results"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const selections = { gd: [], me: [], ie: [] };
+let currentData = {};
+let searchTimer = null;
+let highlightIndex = -1;
+
+function switchTab(tabId, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('tab-' + tabId).classList.add('active');
+  btn.classList.add('active');
+}
+
+function initDates() {
+  const today = new Date();
+  const weekAgo = new Date(today);
+  weekAgo.setDate(today.getDate() - 7);
+  const fmt = d => d.toISOString().slice(0, 10);
+
+  ['gd', 'me', 'ie'].forEach(scope => {
+    document.getElementById(scope + '-end').value = fmt(today);
+    document.getElementById(scope + '-start').value = fmt(weekAgo);
+  });
+}
+
+function onSearchInput(input) {
+  const q = input.value.trim();
+  const scope = input.dataset.scope;
+  clearTimeout(searchTimer);
+
+  if (q.length < 1) {
+    hideDropdown(scope);
+    return;
+  }
+
+  searchTimer = setTimeout(() => doSearch(q, scope), 200);
+}
+
+async function doSearch(q, scope) {
+  try {
+    let url = '/api/search?q=' + encodeURIComponent(q);
+    if (scope === 'gd') url += '&type=group';
+    const res = await fetch(url);
+    const items = await res.json();
+    renderDropdown(scope, items);
+  } catch(e) {
+    hideDropdown(scope);
+  }
+}
+
+let _dropdownItems = [];
+
+function renderDropdown(scope, items) {
+  const dd = document.getElementById(scope + '-dropdown');
+  const selected = new Set(selections[scope].map(s => s.username));
+
+  const filtered = items.filter(i => !selected.has(i.username));
+  if (filtered.length === 0) {
+    dd.innerHTML = '<div class="search-item" style="color:#999;cursor:default">无匹配结果</div>';
+    dd.classList.add('visible');
+    _dropdownItems = [];
+    highlightIndex = -1;
+    return;
+  }
+
+  _dropdownItems = filtered;
+
+  dd.innerHTML = filtered.map((item, idx) => {
+    const badge = item.type === 'group'
+      ? '<span class="type-badge group">群聊</span>'
+      : '<span class="type-badge contact">联系人</span>';
+    return `<div class="search-item${idx === 0 ? ' highlighted' : ''}" data-idx="${idx}" data-scope="${scope}">
+              <span>${escHtml(item.display)}</span>${badge}
+            </div>`;
+  }).join('');
+
+  dd.querySelectorAll('.search-item[data-idx]').forEach(el => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const i = parseInt(el.dataset.idx);
+      addSelection(el.dataset.scope, _dropdownItems[i]);
+    });
+    el.addEventListener('mouseenter', () => highlightItem(el));
+  });
+
+  dd.classList.add('visible');
+  highlightIndex = 0;
+}
+
+function highlightItem(el) {
+  el.parentElement.querySelectorAll('.search-item').forEach(s => s.classList.remove('highlighted'));
+  el.classList.add('highlighted');
+  highlightIndex = parseInt(el.dataset.idx || '0');
+}
+
+function hideDropdown(scope) {
+  document.getElementById(scope + '-dropdown').classList.remove('visible');
+  highlightIndex = -1;
+}
+
+function onSearchKeydown(e, input) {
+  const scope = input.dataset.scope;
+  const dd = document.getElementById(scope + '-dropdown');
+  const items = dd.querySelectorAll('.search-item:not([style*="cursor:default"])');
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    highlightIndex = Math.min(highlightIndex + 1, items.length - 1);
+    items.forEach((el, i) => el.classList.toggle('highlighted', i === highlightIndex));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    highlightIndex = Math.max(highlightIndex - 1, 0);
+    items.forEach((el, i) => el.classList.toggle('highlighted', i === highlightIndex));
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (highlightIndex >= 0 && highlightIndex < _dropdownItems.length) {
+      addSelection(scope, _dropdownItems[highlightIndex]);
+    }
+  } else if (e.key === 'Backspace' && input.value === '' && selections[scope].length > 0) {
+    removeSelection(scope, selections[scope].length - 1);
+  } else if (e.key === 'Escape') {
+    hideDropdown(scope);
+  }
+}
+
+function addSelection(scope, item) {
+  if (selections[scope].some(s => s.username === item.username)) return;
+  selections[scope].push(item);
+  renderChips(scope);
+
+  const input = document.querySelector(`[data-scope="${scope}"]`);
+  input.value = '';
+  hideDropdown(scope);
+  input.focus();
+}
+
+function removeSelection(scope, idx) {
+  selections[scope].splice(idx, 1);
+  renderChips(scope);
+}
+
+function renderChips(scope) {
+  const box = document.querySelector(`#${scope}-wrap .tag-input-box`);
+  const input = box.querySelector('.tag-input');
+  box.querySelectorAll('.tag-chip').forEach(c => c.remove());
+
+  selections[scope].forEach((item, idx) => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip' + (item.type === 'group' ? ' group' : '');
+    chip.innerHTML = `${escHtml(item.display)}<span class="remove">×</span>`;
+    chip.querySelector('.remove').addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeSelection(scope, idx);
+    });
+    box.insertBefore(chip, input);
+  });
+}
+
+function getSelectedUsernames(scope) {
+  return selections[scope].map(s => s.username);
+}
+
+function getSelectedDisplayNames(scope) {
+  return selections[scope].map(s => s.display);
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+document.addEventListener('click', (e) => {
+  ['gd', 'me', 'ie'].forEach(scope => {
+    const wrap = document.getElementById(scope + '-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      hideDropdown(scope);
+    }
+  });
+});
+
+async function runGroupDigest() {
+  const btn = document.getElementById('gd-run');
+  const results = document.getElementById('gd-results');
+  const usernames = getSelectedUsernames('gd');
+
+  if (usernames.length === 0) {
+    results.innerHTML = '<div class="empty">请先搜索并选择至少一个群聊</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '运行中...';
+  results.innerHTML = '<div class="loading">正在分析群聊消息...</div>';
+
+  const nameMap = {};
+  selections.gd.forEach(s => { nameMap[s.username] = s.display; });
+
+  try {
+    const res = await fetch('/api/run/group-digest', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        usernames,
+        start_date: document.getElementById('gd-start').value,
+        end_date: document.getElementById('gd-end').value,
+        names: nameMap,
+      })
+    });
+    const data = await res.json();
+    currentData['group-digest'] = data;
+    renderGroupDigest(data);
+    document.getElementById('gd-download').classList.remove('hidden');
+  } catch(e) {
+    results.innerHTML = '<div class="empty">运行失败: ' + e.message + '</div>';
+  }
+  btn.disabled = false;
+  btn.textContent = '运行';
+}
+
+function renderGroupDigest(data) {
+  const el = document.getElementById('gd-results');
+  const sections = data.sections || [];
+
+  let html = `
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">总消息</div><div class="stat-value">${data.total_messages}</div></div>
+      <div class="stat-card"><div class="stat-label">文本消息</div><div class="stat-value">${data.text_messages}</div></div>
+      <div class="stat-card"><div class="stat-label">群聊数</div><div class="stat-value">${sections.length}</div></div>
+      <div class="stat-card"><div class="stat-label">时间范围</div><div class="stat-value" style="font-size:14px">${data.date_range}</div></div>
+    </div>
+  `;
+
+  sections.forEach(sec => {
+    const persons = sec.person_blocks || [];
+    const links = sec.links || [];
+
+    html += `<div class="result-section">
+      <div class="section-title" style="border-bottom:2px solid #5a7a3a;padding-bottom:8px;margin-bottom:12px">
+        ${escHtml(sec.display)}（${sec.total_messages}条消息 · ${sec.text_messages}条文本 · ${persons.length}人发言 · ${links.length}个链接）
+      </div>`;
+
+    if (persons.length > 0) {
+      html += `<div style="margin-bottom:12px;font-size:13px;color:#888">按发言人聚合（字数降序，共${persons.length}人）</div>`;
+      persons.forEach(p => {
+        html += `<div class="person-block">
+          <div class="block-header" onclick="this.parentElement.classList.toggle('expanded')">
+            <span class="block-sender">${escHtml(p.sender)}</span>
+            <span class="block-meta">${p.msg_count}条 · ${p.char_count}字</span>
+          </div>
+          <div class="block-msgs">`;
+        (p.messages || []).forEach(m => {
+          if (m.image_url) {
+            html += `<div class="msg-line"><span class="msg-time">${escHtml((m.time||'').substring(5,16))}</span><img src="${escHtml(m.image_url)}" style="max-width:200px;max-height:200px;border-radius:6px;margin:4px 0;display:block;cursor:pointer" onclick="window.open(this.src,'_blank')" onerror="this.outerHTML='<span class=\\'img-placeholder\\'>📷 图片加载失败</span>'"></div>`;
+          } else if (m.image_quality === 'thumb') {
+            html += `<div class="msg-line"><span class="msg-time">${escHtml((m.time||'').substring(5,16))}</span><span class="img-thumb-hint">📷 缩略图（在微信中点开查看后可获得高清版）</span></div>`;
+          } else {
+            html += `<div class="msg-line"><span class="msg-time">${escHtml((m.time||'').substring(5,16))}</span>${replyQuote(m)}${escHtml(m.content)}</div>`;
+          }
+        });
+        html += '</div></div>';
+      });
+    }
+
+    if (links.length > 0) {
+      html += '<div style="margin-top:12px"><div style="font-size:13px;color:#888;margin-bottom:8px">链接列表</div><div style="overflow-x:auto"><table class="link-table"><thead><tr><th>发布人</th><th>链接</th><th>标记</th><th>时间</th></tr></thead><tbody>';
+      links.forEach(l => {
+        const tag = l.has_hongbao ? '<span class="tag tag-hongbao">红包</span>' : '<span class="tag tag-share">分享</span>';
+        html += `<tr><td>${escHtml(l.sender)}</td><td><a href="${escHtml(l.url)}" target="_blank">${escHtml(l.url.substring(0,60))}</a></td><td>${tag}</td><td>${escHtml((l.time||'').substring(11,16))}</td></tr>`;
+      });
+      html += '</tbody></table></div></div>';
+    }
+
+    html += '</div>';
+  });
+
+  el.innerHTML = html;
+}
+
+async function runMaterialExtract() {
+  const btn = document.getElementById('me-run');
+  const results = document.getElementById('me-results');
+  const usernames = getSelectedUsernames('me');
+
+  if (usernames.length === 0) {
+    results.innerHTML = '<div class="empty">请先搜索并选择至少一个群聊或联系人</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '运行中...';
+  results.innerHTML = '<div class="loading">正在提取素材...</div>';
+
+  const nameMap = {};
+  selections.me.forEach(s => { nameMap[s.username] = s.display; });
+
+  try {
+    const res = await fetch('/api/run/material-extract', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        usernames,
+        start_date: document.getElementById('me-start').value,
+        end_date: document.getElementById('me-end').value,
+        names: nameMap,
+      })
+    });
+    const data = await res.json();
+    currentData['material-extract'] = data;
+    renderMaterialExtract(data);
+    document.getElementById('me-download').classList.remove('hidden');
+    document.getElementById('me-export-folder').classList.remove('hidden');
+  } catch(e) {
+    results.innerHTML = '<div class="empty">运行失败: ' + e.message + '</div>';
+  }
+  btn.disabled = false;
+  btn.textContent = '运行';
+}
+
+// 回复关系渲染成低调引用行；@提及不渲染（正文本身就带 @昵称，重复反而乱）
+function replyQuote(m) {
+  const r = m.reply_to;
+  if (!r) return '';
+  let q = r.quoted || '';
+  if (q.length > 34) q = q.substring(0, 34) + '…';
+  const who = r.to_name || '某人';
+  return `<div class="reply-quote">↩ <span class="rq-name">${escHtml(who)}</span>：${escHtml(q)}</div>`;
+}
+
+// 渲染单条消息的媒体内容（图片/视频/文字），素材提取与其他 tab 可复用
+function renderMsgMedia(m) {
+  const content = m.content || '';
+  if (m.image_url) {
+    return `<img src="${escHtml(m.image_url)}" style="max-width:240px;max-height:240px;border-radius:6px;margin:4px 0;display:block;cursor:pointer" onclick="window.open(this.src,'_blank')" onerror="this.outerHTML='<span class=\\'img-placeholder\\'>📷 图片加载失败</span>'">`;
+  }
+  if (m.image_quality === 'thumb') {
+    return `<span class="img-thumb-hint">📷 缩略图（在微信中点开查看后可获得高清版）</span>`;
+  }
+  if (m.video_url) {
+    const cover = m.video_cover ? `<img src="${escHtml(m.video_cover)}" style="max-width:240px;max-height:240px;border-radius:6px;display:block">` : '<div style="width:120px;height:80px;background:#333;border-radius:6px"></div>';
+    return `<div class="video-wrap" onclick="window.open('${escHtml(m.video_url)}','_blank')" title="点击播放/下载视频">${cover}<span class="video-play">▶</span></div>`;
+  }
+  if (m.video_quality === 'cover') {
+    const cover = m.video_cover ? `<img src="${escHtml(m.video_cover)}" style="max-width:240px;max-height:240px;border-radius:6px;display:block;opacity:.85;margin-bottom:4px">` : '';
+    return `<div style="margin:4px 0">${cover}<span class="img-thumb-hint">🎬 视频未下载（仅封面，在微信中点开播放后可获得完整视频）</span></div>`;
+  }
+  if (content.includes('[视频]')) {
+    return `<span class="img-placeholder">🎬 视频（微信本地无文件）</span>`;
+  }
+  return replyQuote(m) + escHtml(content);
+}
+
+function renderMaterialExtract(data) {
+  const el = document.getElementById('me-results');
+  const sections = data.sections || [];
+  const totalGroups = sections.reduce((n, s) => n + (s.material_groups || []).length, 0);
+
+  let html = `
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">总消息</div><div class="stat-value">${data.total_messages}</div></div>
+      <div class="stat-card"><div class="stat-label">素材组</div><div class="stat-value">${totalGroups}</div></div>
+      <div class="stat-card"><div class="stat-label">目标数</div><div class="stat-value">${sections.length}</div></div>
+      <div class="stat-card"><div class="stat-label">链接</div><div class="stat-value">${data.links.length}</div></div>
+    </div>
+  `;
+
+  const allMsgs = sections.flatMap(s => (s.material_groups || []).flatMap(g => g.messages || []));
+  const thumbCount = allMsgs.filter(m => m.image_quality === 'thumb').length;
+  const vidUndl = allMsgs.filter(m => m.video_quality === 'cover' || m.video_quality === 'none').length;
+  if (thumbCount > 0 || vidUndl > 0) {
+    let tip = '💡 ';
+    if (thumbCount > 0) tip += `有 ${thumbCount} 张图片仅有缩略图`;
+    if (vidUndl > 0) tip += `${thumbCount > 0 ? '、' : '有 '}${vidUndl} 个视频未下载`;
+    tip += `（微信未下载原文件）。在微信中点开查看/播放后，重新运行即可获得高清/完整版。`;
+    html += `<div class="img-thumb-banner">${tip}<br><span style="font-size:11px;opacity:0.7">进阶：使用 Claude Code Computer Use 可自动批量完成此操作，详见使用指南。</span></div>`;
+  }
+
+  sections.forEach(sec => {
+    const groups = sec.material_groups || [];
+    if (groups.length === 0) return;
+    html += `<div class="result-section">
+      <div class="section-title" style="border-bottom:2px solid #5a7a3a;padding-bottom:8px;margin-bottom:12px">
+        ${escHtml(sec.display)}（${sec.total_messages}条消息 · ${groups.length}组素材）
+      </div>
+      <div class="material-grid">`;
+    groups.forEach((g, idx) => {
+      const timeRange = (g.start_time||'').substring(5,16) + (g.start_time !== g.end_time ? ' ~ ' + (g.end_time||'').substring(11,16) : '');
+      let badges = '';
+      if (g.image_count > 0) badges += `<span class="badge badge-img">${g.image_count}图</span>`;
+      if (g.video_count > 0) badges += `<span class="badge badge-img">${g.video_count}视频</span>`;
+      if (g.text_count > 0) badges += `<span class="badge badge-text">${g.text_count}文</span>`;
+      html += `<div class="material-card">
+        <div class="card-header">#${idx+1} ｜ ${escHtml(g.sender)} ｜ ${timeRange} ${badges}</div>
+        <div class="card-body">`;
+      g.messages.forEach(m => { html += renderMsgMedia(m) + '\n'; });
+      html += '</div></div>';
+    });
+    html += '</div></div>';
+  });
+
+  if (data.links.length > 0) {
+    html += '<div class="result-section"><div class="section-title">所有链接</div><div style="overflow-x:auto"><table class="link-table"><thead><tr><th>发布人</th><th>链接</th><th>时间</th></tr></thead><tbody>';
+    data.links.forEach(l => {
+      html += `<tr><td>${escHtml(l.sender)}</td><td><a href="${escHtml(l.url)}" target="_blank">${escHtml(l.url.substring(0,70))}</a></td><td>${escHtml((l.time||'').substring(11,16))}</td></tr>`;
+    });
+    html += '</tbody></table></div></div>';
+  }
+
+  el.innerHTML = html || '<div class="empty">未找到素材</div>';
+}
+
+async function runInfoExport() {
+  const btn = document.getElementById('ie-run');
+  const results = document.getElementById('ie-results');
+  const usernames = getSelectedUsernames('ie');
+
+  if (usernames.length === 0) {
+    results.innerHTML = '<div class="empty">请先搜索并选择至少一个群聊或联系人</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '运行中...';
+  results.innerHTML = '<div class="loading">正在导出信息...</div>';
+
+  const nameMap = {};
+  selections.ie.forEach(s => { nameMap[s.username] = s.display; });
+
+  try {
+    const res = await fetch('/api/run/info-export', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        usernames,
+        start_date: document.getElementById('ie-start').value,
+        end_date: document.getElementById('ie-end').value,
+        names: nameMap,
+      })
+    });
+    const data = await res.json();
+    currentData['info-export'] = data;
+    renderInfoExport(data);
+    document.getElementById('ie-download').classList.remove('hidden');
+  } catch(e) {
+    results.innerHTML = '<div class="empty">运行失败: ' + e.message + '</div>';
+  }
+  btn.disabled = false;
+  btn.textContent = '运行';
+}
+
+function renderInfoExport(data) {
+  const el = document.getElementById('ie-results');
+  const sections = data.sections || [];
+
+  let html = `
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">总消息</div><div class="stat-value">${data.total_messages}</div></div>
+      <div class="stat-card"><div class="stat-label">导出目标</div><div class="stat-value">${sections.length}</div></div>
+      <div class="stat-card"><div class="stat-label">时间范围</div><div class="stat-value" style="font-size:14px">${data.date_range}</div></div>
+    </div>
+  `;
+
+  sections.forEach(sec => {
+    const moreTag = sec.has_more ? `<span style="color:#999;font-size:13px;margin-left:8px">（预览前50条，下载获取全部${sec.total}条）</span>` : '';
+    html += `<div class="result-section">
+      <div class="section-title" style="border-bottom:2px solid #5a7a3a;padding-bottom:8px;margin-bottom:12px">
+        ${escHtml(sec.display)}（${sec.total}条）${moreTag}
+      </div>
+      <div class="message-list">`;
+    sec.preview.forEach(m => {
+      let content = '';
+      if (m.image_url) {
+        content = `<img src="${escHtml(m.image_url)}" style="max-width:200px;max-height:200px;border-radius:4px;margin:2px 0;display:block;cursor:pointer" onclick="window.open(this.src,'_blank')" onerror="this.outerHTML='<span class=\\'img-placeholder\\'>📷 图片加载失败</span>'">`;
+      } else if (m.image_quality === 'thumb') {
+        content = `<span class="img-thumb-hint">📷 缩略图（在微信中点开查看后可获得高清版）</span>`;
+      } else {
+        content = replyQuote(m) + escHtml(m.content || '');
+      }
+      html += `<div class="message-item"><span class="sender">${escHtml(m.sender)}</span><span class="time">${escHtml((m.time||'').substring(11,16))}</span><br>${content}</div>`;
+    });
+    html += '</div></div>';
+  });
+
+  el.innerHTML = html;
+}
+
+function downloadReport(type) {
+  const data = currentData[type];
+  if (!data) return;
+
+  if (type === 'group-digest') {
+    const btn = document.getElementById('gd-download');
+    btn.textContent = '导出中...';
+    btn.disabled = true;
+    const gdNameMap = {};
+    selections.gd.forEach(s => { gdNameMap[s.username] = s.display; });
+    fetch('/api/export/group-digest', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        usernames: getSelectedUsernames('gd'),
+        start_date: document.getElementById('gd-start').value,
+        end_date: document.getElementById('gd-end').value,
+        names: gdNameMap,
+      })
+    }).then(res => res.blob()).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `group-digest-${new Date().toISOString().slice(0,10)}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }).finally(() => { btn.textContent = '下载 Markdown'; btn.disabled = false; });
+    return;
+  }
+
+  if (type === 'material-extract') {
+    const btn = document.getElementById('me-download');
+    btn.textContent = '导出中...';
+    btn.disabled = true;
+    fetch('/api/export/material-extract', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        usernames: getSelectedUsernames('me'),
+        start_date: document.getElementById('me-start').value,
+        end_date: document.getElementById('me-end').value,
+        names: getSelectedDisplayNames('me').join(', '),
+      })
+    }).then(res => res.blob()).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `material-extract-${new Date().toISOString().slice(0,10)}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }).finally(() => { btn.textContent = '下载 Markdown'; btn.disabled = false; });
+    return;
+  }
+
+  if (type === 'info-export') {
+    const btn = document.getElementById('ie-download');
+    btn.textContent = '导出中...';
+    btn.disabled = true;
+    const nameMap = {};
+    selections.ie.forEach(s => { nameMap[s.username] = s.display; });
+    fetch('/api/export/info-export', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        usernames: getSelectedUsernames('ie'),
+        start_date: document.getElementById('ie-start').value,
+        end_date: document.getElementById('ie-end').value,
+        names: nameMap,
+      })
+    }).then(res => res.blob()).then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `info-export-${new Date().toISOString().slice(0,10)}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }).finally(() => { btn.textContent = '下载 Markdown'; btn.disabled = false; });
+    return;
+  }
+}
+
+async function exportMaterialToFolder() {
+  const btn = document.getElementById('me-export-folder');
+  btn.textContent = '导出中...';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/export/material-to-folder', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        usernames: getSelectedUsernames('me'),
+        start_date: document.getElementById('me-start').value,
+        end_date: document.getElementById('me-end').value,
+        names: getSelectedDisplayNames('me').join(', '),
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = `✓ 已导出 ${data.images} 张图片`;
+      const openBtn = document.createElement('button');
+      openBtn.className = 'btn-download';
+      openBtn.textContent = '打开文件夹';
+      openBtn.style.marginLeft = '8px';
+      openBtn.onclick = () => {
+        fetch('/api/open-folder', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({path: data.path})
+        });
+      };
+      btn.parentNode.insertBefore(openBtn, btn.nextSibling);
+    } else {
+      btn.textContent = '导出失败';
+    }
+  } catch(e) {
+    btn.textContent = '导出失败: ' + e.message;
+  }
+  setTimeout(() => { btn.textContent = '导出到文件夹（含图片）'; btn.disabled = false; }, 5000);
+}
+
+async function syncData() {
+  const btn = document.getElementById('sync-btn');
+  const status = document.getElementById('sync-status');
+  btn.disabled = true;
+  btn.textContent = '同步中...';
+  status.textContent = '正在增量解密数据库...';
+  status.style.color = '#999';
+  try {
+    const res = await fetch('/api/sync', {method: 'POST'});
+    const data = await res.json();
+    if (data.ok) {
+      status.textContent = '同步完成';
+      status.style.color = '#5a7a3a';
+    } else {
+      status.textContent = '同步失败: ' + (data.error || '未知错误');
+      status.style.color = '#c44';
+    }
+  } catch(e) {
+    status.textContent = '同步失败: ' + e.message;
+    status.style.color = '#c44';
+  }
+  btn.disabled = false;
+  btn.textContent = '同步最新数据';
+}
+
+initDates();
+
+let _disconnected = false;
+async function checkHealth() {
+  try {
+    const res = await fetch('/api/health', {signal: AbortSignal.timeout(3000)});
+    if (res.ok && _disconnected) {
+      _disconnected = false;
+      document.getElementById('disconnect-banner').classList.remove('visible');
+    }
+  } catch(e) {
+    if (!_disconnected) {
+      _disconnected = true;
+      document.getElementById('disconnect-banner').classList.add('visible');
+    }
+  }
+}
+setInterval(checkHealth, 15000);
+</script>
+</body>
+</html>

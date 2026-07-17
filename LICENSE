@@ -1,0 +1,40 @@
+Non-Commercial Source-Available License
+
+Copyright (c) 2026 v-local-chat authors
+
+This repository is source-available for personal learning, research, and
+non-commercial personal use only. Permission is granted to view, clone, study,
+and modify it for personal non-commercial purposes, subject to all of the
+following conditions:
+
+1. No commercial use. You may not sell, rent, sublicense, provide paid access
+   to, include in a paid product or service, use for client delivery, or use
+   for any revenue-generating or business-operational purpose without prior
+   written permission from the copyright holder.
+
+2. No public redistribution as a competing or packaged product. You may fork
+   for personal study, but you may not republish, mirror, package, or market
+   this repository or a derivative work as a public product, template bundle,
+   marketplace item, SaaS component, agency deliverable, course asset, or
+   commercial/internal company toolkit without prior written permission.
+
+3. Preserve attribution. Any permitted fork or excerpt must keep this license
+   and the notices in NOTICES.md.
+
+4. Respect third-party materials. The key-acquisition and decryption technique
+   referenced by this project originates from publicly documented methods in
+   third-party projects (see NOTICES.md). This repository does not include or
+   redistribute their source code. Their terms remain in effect for those
+   upstream materials.
+
+5. Privacy and compliance are your responsibility. Use only on data you own and
+   are authorized to access. Do not commit real keys, databases, chat records,
+   or other private information.
+
+THE REPOSITORY IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGE, LOSS,
+OR OTHER LIABILITY ARISING FROM USE OF THIS REPOSITORY.
+
+Note: if you prefer a standard license, PolyForm Noncommercial 1.0.0
+(https://polyformproject.org/licenses/noncommercial/1.0.0/) expresses
+substantially the same intent.
