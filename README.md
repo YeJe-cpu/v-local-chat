@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/wechat-logo.png" width="72" alt="v-local-chat">
+  <img src="assets/wechat-logo.png" width="132" alt="v-local-chat">
 </p>
 
 <h1 align="center">v-local-chat · 本地聊天分析面板</h1>
@@ -15,17 +15,16 @@
 
 ## 三个场景，一眼看懂
 
-**群聊精华** —— 按发言人聚合、按贡献度排序，一眼看出谁在输出干货：
-![群聊精华](assets/tab-群聊精华.png)
-
-**素材提取** —— 图文 / 链接 / 文件 / 视频按时间分组，可导出：
-![素材提取](assets/tab-素材提取.png)
-
-**信息导出（对话备份）** —— 完整时间线、跨天日期分隔，可连图片视频导出成文件夹：
-![信息导出](assets/tab-信息导出.png)
-
-导出结果（图文一起落盘，不再是光秃秃的文字）：
-![导出结果](assets/demo-导出结果.png)
+<table>
+<tr>
+<td width="50%" valign="top"><b>群聊精华</b> —— 按发言人聚合、按贡献度排序，一眼看出谁在输出干货<br><br><img src="assets/tab-群聊精华.png" width="100%"></td>
+<td width="50%" valign="top"><b>素材提取</b> —— 图文 / 链接 / 文件 / 视频按时间分组，可导出<br><br><img src="assets/tab-素材提取.png" width="100%"></td>
+</tr>
+<tr>
+<td width="50%" valign="top"><b>信息导出（对话备份）</b> —— 完整时间线、跨天日期分隔，可连图片视频导出成文件夹<br><br><img src="assets/tab-信息导出.png" width="100%"></td>
+<td width="50%" valign="top"><b>导出结果</b> —— 图文一起落盘，不再是光秃秃的文字<br><br><img src="assets/demo-导出结果.png" width="100%"></td>
+</tr>
+</table>
 
 ---
 
@@ -50,6 +49,8 @@
 - **人看的和喂 AI 的，分开伺候。** 面板把回复渲染成低调的引用行给你看；给大模型的素材另带纯文本锚点——两种诉求各取所需，界面不乱、上下文不丢。
 
 ## 三步跑起来
+
+> **最省心的方式：把这个仓库丢给你的命令行 Agent**（Claude Code / Codex / Grok build…），让它照着 [`docs/`](docs/) 帮你跑通。**全程你只需在两个点上亲手配合：输一次本机密码、扫码登录。** 其余复制软件、抓密钥、解密、起面板，Agent 都能代劳。
 
 ```bash
 # 1) 获取密钥（一次性，指引见 docs/01-获取密钥-指引.md，本仓库不含抓取脚本）
