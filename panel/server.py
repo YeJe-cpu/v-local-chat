@@ -650,8 +650,8 @@ def api_info_export():
             "username": username,
             "display": names.get(username, username),
             "total": len(msgs),
-            "preview": msgs[:50],
-            "has_more": len(msgs) > 50,
+            "preview": msgs,          # 信息导出=对话完整备份，页面全量展示，不截断
+            "has_more": False,
         })
 
     return jsonify({
@@ -725,9 +725,19 @@ def api_export_info_export():
         msgs = fetch_messages_for_targets([username], start_date, end_date)
         display = names.get(username, username)
         md += f"## {display}（{len(msgs)}条）\n\n"
+        last_day = ""
+        _wk = "一二三四五六日"
         for m in msgs:
             sender = m.get("sender", "")
-            time_str = (m.get("time", "") or "")[11:16]
+            full = m.get("time", "") or ""
+            day, time_str = full[:10], full[11:16]
+            if day and day != last_day:  # 跨天插入日期标题（带周几）
+                last_day = day
+                try:
+                    wk = _wk[datetime.strptime(day, "%Y-%m-%d").weekday()]
+                    md += f"\n### 📅 {day} 周{wk}\n\n"
+                except ValueError:
+                    md += f"\n### 📅 {day}\n\n"
             content = m.get("content", "")
             if "[图片]" in content:
                 md += f"**{sender}** ({time_str}): 📷 [图片]\n\n"
@@ -799,6 +809,93 @@ def api_export_material_extract():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path.write_text(md, encoding="utf-8")
     return send_file(output_path, as_attachment=True, download_name=filename)
+
+
+@app.route("/api/export/info-to-folder", methods=["POST"])
+def api_export_info_to_folder():
+    """信息导出 = 对话完整备份：导出成一个文件夹，含 media/ 里的图片视频
+    + 一份引用它们的 Markdown（带跨天日期分隔）。与素材提取的文件夹导出对齐。"""
+    import shutil
+    data = request.json
+    usernames = data.get("usernames", [])
+    start_date = data.get("start_date", "")
+    end_date = data.get("end_date", "")
+    names = data.get("names", {})
+    if not usernames or not start_date or not end_date:
+        return jsonify({"error": "缺少必填参数"}), 400
+
+    date_tag = f"{start_date.replace('-', '')}_{end_date.replace('-', '')}"
+    label = re.sub(r'[^\w一-鿿]+', '_', "_".join(names.get(u, u) for u in usernames))[:40].strip("_") or "export"
+    export_dir = OUTPUT_DIR / f"对话备份_{label}_{date_tag}"
+    if export_dir.exists():
+        shutil.rmtree(export_dir)
+    media_dir = export_dir / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+
+    n_img = n_vid = n_miss = 0
+    _wk = "一二三四五六日"
+    md = f"# 对话备份\n\n> 时间范围：{start_date} ~ {end_date}\n\n"
+    for username in usernames:
+        msgs = fetch_messages_for_targets([username], start_date, end_date)
+        display = names.get(username, username)
+        md += f"\n## {display}（{len(msgs)}条）\n\n"
+        last_day = ""
+        hash_map = _build_media_hash_map(username)
+        for i, m in enumerate(msgs):
+            full = m.get("time", "") or ""
+            day, tm = full[:10], full[11:16]
+            if day and day != last_day:
+                last_day = day
+                try:
+                    wk = _wk[datetime.strptime(day, "%Y-%m-%d").weekday()]
+                    md += f"\n### 📅 {day} 周{wk}\n\n"
+                except ValueError:
+                    md += f"\n### 📅 {day}\n\n"
+            sender = m.get("sender", "")
+            content = m.get("content", "")
+            ts = m.get("timestamp")
+            fh = hash_map.get(int(ts)) if ts else None
+            if ts and "[图片]" in content:
+                path, quality = find_image_file(username, int(ts), with_quality=True, file_hash=fh)
+                raw = path.read_bytes() if path else None
+                dec = decrypt_v2_dat(raw) if raw and raw[:6] == V2_MAGIC else raw
+                if dec and dec[:3] == b"\xff\xd8\xff":
+                    ext = ".jpg"
+                elif dec and dec[:4] == b"\x89PNG":
+                    ext = ".png"
+                elif dec and dec[:4] == b"RIFF":
+                    ext = ".webp"
+                else:
+                    dec = None
+                if dec:
+                    n_img += 1
+                    fn = f"img_{n_img:03d}{'_thumb' if quality == 'thumb' else ''}{ext}"
+                    (media_dir / fn).write_bytes(dec)
+                    note = "（仅缩略图）" if quality == "thumb" else ""
+                    md += f"**{sender}** ({tm}): 📷{note}\n\n![]({'media/' + fn})\n\n"
+                else:
+                    n_miss += 1
+                    md += f"**{sender}** ({tm}): 📷 [图片]（本地无可解码文件：未下载，或为微信私有 wxgf 编码）\n\n"
+            elif ts and "[视频]" in content:
+                mp4, cover = find_video_file(username, int(ts), file_hash=fh)
+                if mp4:
+                    n_vid += 1
+                    fn = f"video_{n_vid:03d}.mp4"
+                    shutil.copy2(str(mp4), str(media_dir / fn))
+                    md += f"**{sender}** ({tm}): 🎬 [视频] → [{fn}]({'media/' + fn})\n\n"
+                elif cover:
+                    n_vid += 1
+                    fn = f"video_{n_vid:03d}_封面.jpg"
+                    shutil.copy2(str(cover), str(media_dir / fn))
+                    md += f"**{sender}** ({tm}): 🎬 [视频]（仅封面，视频未下载）\n\n![]({'media/' + fn})\n\n"
+                else:
+                    n_miss += 1
+                    md += f"**{sender}** ({tm}): 🎬 [视频]（本地无文件）\n\n"
+            else:
+                md += f"**{sender}** ({tm}): {reply_prefix(m)}{content}\n\n"
+
+    (export_dir / "对话备份.md").write_text(md, encoding="utf-8")
+    return jsonify({"ok": True, "path": str(export_dir), "images": n_img, "videos": n_vid, "missing": n_miss})
 
 
 @app.route("/api/export/material-to-folder", methods=["POST"])

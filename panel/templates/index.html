@@ -68,6 +68,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .message-item { padding: 8px 0; border-bottom: 1px solid #f8f8f5; font-size: 13px; line-height: 1.6; }
 .message-item .sender { color: #5a7a3a; font-weight: 600; }
 .message-item .time { color: #bbb; font-size: 11px; margin-left: 8px; }
+.date-divider { text-align: center; color: #999; font-size: 12px; margin: 16px 0 8px; padding: 4px 0; border-top: 1px dashed #e5e2db; }
 
 .person-block { border-left: 3px solid #5a7a3a; padding: 12px 16px; margin-bottom: 14px; background: #fcfcfa; border-radius: 0 8px 8px 0; }
 .person-block .block-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px; cursor: pointer; }
@@ -227,6 +228,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
           </div>
           <button class="btn-run" id="ie-run" onclick="runInfoExport()">运行</button>
           <button class="btn-download hidden" id="ie-download" onclick="downloadReport('info-export')">下载 Markdown</button>
+          <button class="btn-download hidden" id="ie-export-folder" onclick="exportInfoToFolder()">导出到文件夹（含图片视频）</button>
         </div>
       </div>
       <div id="ie-results"></div>
@@ -404,6 +406,15 @@ function escHtml(s) {
   const d = document.createElement('div');
   d.textContent = s;
   return d.innerHTML;
+}
+
+// "2026-07-15" -> "2026-07-15 周三"
+function dayLabel(day) {
+  const wk = ['日','一','二','三','四','五','六'];
+  const parts = (day || '').split('-');
+  if (parts.length !== 3) return day;
+  const dt = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+  return `${day} 周${wk[dt.getDay()]}`;
 }
 
 document.addEventListener('click', (e) => {
@@ -677,6 +688,7 @@ async function runInfoExport() {
     currentData['info-export'] = data;
     renderInfoExport(data);
     document.getElementById('ie-download').classList.remove('hidden');
+    document.getElementById('ie-export-folder').classList.remove('hidden');
   } catch(e) {
     results.innerHTML = '<div class="empty">运行失败: ' + e.message + '</div>';
   }
@@ -703,7 +715,14 @@ function renderInfoExport(data) {
         ${escHtml(sec.display)}（${sec.total}条）${moreTag}
       </div>
       <div class="message-list">`;
+    let lastDay = '';
     sec.preview.forEach(m => {
+      // 跨天时插入日期分隔条（带周几），避免只看到时分不知道是哪天
+      const day = (m.time || '').substring(0, 10);
+      if (day && day !== lastDay) {
+        lastDay = day;
+        html += `<div class="date-divider">${escHtml(dayLabel(day))}</div>`;
+      }
       // 统一走 renderMsgMedia：图片/视频/封面/缩略图/文字全覆盖，与素材提取一致
       const content = renderMsgMedia(m);
       html += `<div class="message-item"><span class="sender">${escHtml(m.sender)}</span><span class="time">${escHtml((m.time||'').substring(11,16))}</span><br>${content}</div>`;
@@ -832,6 +851,47 @@ async function exportMaterialToFolder() {
     btn.textContent = '导出失败: ' + e.message;
   }
   setTimeout(() => { btn.textContent = '导出到文件夹（含图片）'; btn.disabled = false; }, 5000);
+}
+
+// 信息导出 = 对话完整备份：导出文件夹（Markdown + media/ 里的图片视频）
+async function exportInfoToFolder() {
+  const btn = document.getElementById('ie-export-folder');
+  btn.textContent = '导出中...';
+  btn.disabled = true;
+  const nameMap = {};
+  selections.ie.forEach(s => { nameMap[s.username] = s.display; });
+  try {
+    const res = await fetch('/api/export/info-to-folder', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        usernames: getSelectedUsernames('ie'),
+        start_date: document.getElementById('ie-start').value,
+        end_date: document.getElementById('ie-end').value,
+        names: nameMap,
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      btn.textContent = `✓ 已导出 ${data.images} 图 / ${data.videos} 视频`;
+      const openBtn = document.createElement('button');
+      openBtn.className = 'btn-download';
+      openBtn.textContent = '打开文件夹';
+      openBtn.style.marginLeft = '8px';
+      openBtn.onclick = () => {
+        fetch('/api/open-folder', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({path: data.path})
+        });
+      };
+      btn.parentNode.insertBefore(openBtn, btn.nextSibling);
+    } else {
+      btn.textContent = '导出失败';
+    }
+  } catch(e) {
+    btn.textContent = '导出失败: ' + e.message;
+  }
+  setTimeout(() => { btn.textContent = '导出到文件夹（含图片视频）'; btn.disabled = false; }, 5000);
 }
 
 async function syncData() {
