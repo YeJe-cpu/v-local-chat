@@ -704,14 +704,8 @@ function renderInfoExport(data) {
       </div>
       <div class="message-list">`;
     sec.preview.forEach(m => {
-      let content = '';
-      if (m.image_url) {
-        content = `<img src="${escHtml(m.image_url)}" style="max-width:200px;max-height:200px;border-radius:4px;margin:2px 0;display:block;cursor:pointer" onclick="window.open(this.src,'_blank')" onerror="this.outerHTML='<span class=\\'img-placeholder\\'>📷 图片加载失败</span>'">`;
-      } else if (m.image_quality === 'thumb') {
-        content = `<span class="img-thumb-hint">📷 缩略图（在微信中点开查看后可获得高清版）</span>`;
-      } else {
-        content = replyQuote(m) + escHtml(m.content || '');
-      }
+      // 统一走 renderMsgMedia：图片/视频/封面/缩略图/文字全覆盖，与素材提取一致
+      const content = renderMsgMedia(m);
       html += `<div class="message-item"><span class="sender">${escHtml(m.sender)}</span><span class="time">${escHtml((m.time||'').substring(11,16))}</span><br>${content}</div>`;
     });
     html += '</div></div>';

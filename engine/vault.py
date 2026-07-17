@@ -12,6 +12,7 @@ v-local-chat 读取/分析引擎（原创，clean-room 实现）。
 from __future__ import annotations
 
 import hashlib
+import html
 import os
 import re
 import sqlite3
@@ -251,11 +252,17 @@ def parse_reply(local_type, content, contacts, roster=None):
             to_name = rn
     if not to_name and not quoted:
         return None
+    # 被引用的本身是 appmsg（引用回复/链接/文件，refermsg.type=49）时，content 里嵌着它的
+    # XML，取真实文本（引用回复取 title），而不是笼统标成"链接/文件"；其它媒体用类型标签。
     try:
-        if refer_type is not None and int(refer_type) != 1:
-            quoted = type_label(int(refer_type))
+        rtype = int(refer_type) if refer_type is not None else None
     except (TypeError, ValueError):
-        pass
+        rtype = None
+    if "<appmsg" in quoted or "&lt;appmsg" in quoted:
+        inner = html.unescape(quoted) if "&lt;" in quoted else quoted
+        quoted = format_content(49, inner)
+    elif rtype is not None and rtype != 1:
+        quoted = type_label(rtype)
     if quoted.startswith("<"):
         quoted = "[非文本内容]"
     return {"to_name": to_name, "quoted": normalize_emoji(quoted)}
