@@ -9,9 +9,7 @@ decrypted/
 vault/
 exports/
 output/
-assets/*.png
-assets/*.jpg
-!assets/.gitkeep
+# 注意：assets/ 里是经过脱敏的 demo 截图，需要提交（README 用），不要忽略。
 
 # Python
 __pycache__/
