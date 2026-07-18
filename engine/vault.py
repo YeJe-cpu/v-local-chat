@@ -350,7 +350,13 @@ def format_content(local_type, content):
             return f"[链接/文件] {title or des}".strip()
         except Exception:
             return content.strip() or "[链接/文件]"
-    if base not in (1, 10000):
+    if base == 10000:
+        # 系统消息：带 XML 标签的（群公告 ChatRoomTopMsgResponse / 撤回 / 拍一拍等）给干净标签，
+        # 别把原始 XML 吐到界面；纯文本的（"X邀请Y加入了群聊"）保留原文。
+        if re.search(r"<[a-zA-Z/!]", content):
+            return "[系统消息]"
+        return normalize_emoji(content.strip())
+    if base != 1:
         return f"[{type_label(local_type)}] {normalize_emoji(content)}".strip()
     return normalize_emoji(content.strip())
 
@@ -368,7 +374,13 @@ def _row_to_message(row, chat, contacts, name2id, roster):
         sender_username = ""
     if not sender_username:
         sender_username = prefix_sender
-    if chat["is_group"]:
+    base_type, _ = split_msg_type(lt)
+    is_system = base_type == 10000
+    if is_system:
+        # 系统消息（邀请入群 / "非朋友关系"提示 / 群公告 / 撤回等）不是任何人的发言，
+        # 统一归为"系统"，绝不按 real_sender_id 挂到某个人头上（否则新群会被入群通知霸榜）。
+        sender = "系统"
+    elif chat["is_group"]:
         sender = resolve_name(sender_username, contacts, roster) if sender_username else ""
         if sender_username and (not sender or sender == sender_username):
             sender = f"群友-{sender_username[5:11]}" if sender_username.startswith("wxid_") else sender_username
@@ -381,7 +393,7 @@ def _row_to_message(row, chat, contacts, name2id, roster):
     src = decode_value(row["source"]) if "source" in row.keys() else ""
     return {
         "local_id": row["local_id"], "local_type": lt, "type": type_label(lt),
-        "sender": sender, "sender_username": sender_username,
+        "sender": sender, "sender_username": sender_username, "is_system": is_system,
         "timestamp": ts, "time": datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S") if ts else "",
         "content": format_content(lt, content),
         "reply_to": parse_reply(lt, content, contacts, roster),

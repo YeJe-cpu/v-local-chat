@@ -513,6 +513,11 @@ def _filter_display_messages(messages):
     result = []
     for msg in messages:
         content = msg.get("content", "")
+        # 系统消息（邀请入群/非朋友提示/群公告等）按类型/标记排除，别靠内容文字匹配——
+        # 否则纯文本的"X邀请Y加入了群聊"会溜进聚合、在新群里霸榜发言排行。
+        if msg.get("is_system") or msg.get("sender") == "系统" \
+                or (int(msg.get("local_type") or 0) & 0xFFFFFFFF) == 10000:
+            continue
         if msg.get("image_url"):
             result.append(msg)
             continue
