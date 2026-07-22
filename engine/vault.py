@@ -504,26 +504,56 @@ def _derive_keys(data_dir):
     return None, None
 
 
-WECHAT_DATA_DIR = _find_wechat_data_dir()
-IMAGE_AES_KEY, IMAGE_XOR_KEY = _derive_keys(WECHAT_DATA_DIR)
+# 惰性初始化：定位聊天软件容器、派生图片密钥都要读它的容器目录，而 macOS 只要有 App
+# 去读另一个 App 的容器就会弹隐私授权。纯文字查询读的是我们自己解密好的 vault，
+# 本就不需要碰容器——写在模块顶层会让任何一条命令一启动就摸容器、白白触发一次弹窗。
+_LAZY = {}
+
+
+def wechat_data_dir():
+    if "dir" not in _LAZY:
+        _LAZY["dir"] = _find_wechat_data_dir()
+    return _LAZY["dir"]
+
+
+def image_keys():
+    if "keys" not in _LAZY:
+        _LAZY["keys"] = _derive_keys(wechat_data_dir())
+    return _LAZY["keys"]
+
+
+def __getattr__(name):
+    """兼容 `vault.WECHAT_DATA_DIR` 这类模块属性访问（面板在用），且保持惰性。
+
+    模块级 __getattr__ 只对外部属性访问生效；本模块内部必须直接调用
+    wechat_data_dir() / image_keys()。
+    """
+    if name == "WECHAT_DATA_DIR":
+        return wechat_data_dir()
+    if name == "IMAGE_AES_KEY":
+        return image_keys()[0]
+    if name == "IMAGE_XOR_KEY":
+        return image_keys()[1]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def image_ready():
-    return bool(AES and IMAGE_AES_KEY and WECHAT_DATA_DIR)
+    return bool(AES and image_keys()[0] and wechat_data_dir())
 
 
 def decrypt_v2_dat(data):
     """AES 区实际字节 = aes_size//16*16+16（PKCS#7 多补一整块），解密后取前 aes_size 丢填充。"""
-    if not AES or not IMAGE_AES_KEY or len(data) < 15 or data[:6] != V2_MAGIC:
+    aes_key, xor_key = image_keys()
+    if not AES or not aes_key or len(data) < 15 or data[:6] != V2_MAGIC:
         return None
     aes_size = struct.unpack_from("<I", data, 6)[0]
     xor_size = struct.unpack_from("<I", data, 10)[0]
     body = data[15:]
     enc = min((aes_size // 16) * 16 + 16, len(body))
-    res = bytearray(AES.new(IMAGE_AES_KEY.encode("ascii"), AES.MODE_ECB).decrypt(body[:enc])[:aes_size])
+    res = bytearray(AES.new(aes_key.encode("ascii"), AES.MODE_ECB).decrypt(body[:enc])[:aes_size])
     mid = min(max(len(body) - xor_size, enc), len(body))
     res += body[enc:mid]
-    res += bytes(b ^ IMAGE_XOR_KEY for b in body[mid:])
+    res += bytes(b ^ xor_key for b in body[mid:])
     return bytes(res)
 
 
@@ -543,9 +573,10 @@ def _dat_kind(path):
         if head[:4] == b"RIFF":
             return "webp"
         return "other"
-    if not AES or not IMAGE_AES_KEY or len(head) < 31:
+    aes_key = image_keys()[0]
+    if not AES or not aes_key or len(head) < 31:
         return None
-    dec = AES.new(IMAGE_AES_KEY.encode("ascii"), AES.MODE_ECB).decrypt(head[15:31])
+    dec = AES.new(aes_key.encode("ascii"), AES.MODE_ECB).decrypt(head[15:31])
     if dec[:3] == b"\xff\xd8\xff":
         return "jpeg"
     if dec[:4] == b"\x89PNG":
@@ -579,11 +610,12 @@ def _media_hash_map(username):
 
 
 def find_image_file(username, ts, file_hash=None, prefer_thumb=False):
-    if not WECHAT_DATA_DIR:
+    wdir = wechat_data_dir()
+    if not wdir:
         return None, "none"
     ch = hashlib.md5(username.encode()).hexdigest()
     month = datetime.fromtimestamp(ts).strftime("%Y-%m")
-    d = WECHAT_DATA_DIR / "msg" / "attach" / ch / month / "Img"
+    d = wdir / "msg" / "attach" / ch / month / "Img"
     if not d.is_dir():
         return None, "none"
     base = None
@@ -633,10 +665,11 @@ def hd_absence_reason(thumb_path):
 
 
 def find_video_file(username, ts, file_hash=None):
-    if not WECHAT_DATA_DIR or not file_hash:
+    wdir = wechat_data_dir()
+    if not wdir or not file_hash:
         return None, None
     month = datetime.fromtimestamp(ts).strftime("%Y-%m")
-    v = WECHAT_DATA_DIR / "msg" / "video" / month
+    v = wdir / "msg" / "video" / month
     mp4, cover = v / f"{file_hash}.mp4", v / f"{file_hash}.jpg"
     return (mp4 if mp4.exists() else None), (cover if cover.exists() else None)
 
@@ -659,7 +692,11 @@ def image_bytes(path):
 
 
 def enrich_media(username, messages):
-    if not WECHAT_DATA_DIR:
+    # 这批消息里压根没有图片/视频时，直接返回——避免为纯文字对话去摸聊天软件容器
+    # （macOS 上那一摸就会弹“想访问其他应用程序的数据”）。
+    if not any(split_msg_type(m.get("local_type"))[0] in (3, 43) for m in messages):
+        return
+    if not wechat_data_dir():
         return
     hmap = _media_hash_map(username)
     for m in messages:
@@ -697,9 +734,9 @@ def export_media(username, out_dir, start_ts=None, end_ts=None, limit=None):
         missing = []
         if not AES:
             missing.append("pycryptodome 未安装（pip3 install pycryptodome）")
-        if not WECHAT_DATA_DIR:
+        if not wechat_data_dir():
             missing.append("找不到本机聊天软件的附件目录")
-        if not IMAGE_AES_KEY:
+        if not image_keys()[0]:
             missing.append("无法推导图片密钥")
         raise RuntimeError("媒体导出不可用: " + "; ".join(missing))
 
