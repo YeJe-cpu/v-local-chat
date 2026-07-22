@@ -43,6 +43,29 @@ msgs = vault.get_chat_history("联系人或群名/username", start_ts, end_ts, l
 # 每条消息带：sender、content(表情已归一化)、reply_to{to_name,quoted}、mentions[]、image_path/video_path
 ```
 
+## AI 想"看到"图片画面，就这两步
+
+图片在本地是**加密缓存**：`get_chat_history` 给的 `image_path` 是加密的 `.dat`，**直接读它只会是乱码，别读**。
+真正看图必须先解密导出成 `.jpg`，再用你的读图工具读那个 `.jpg`：
+
+```bash
+# 1) 解密导出（图片/视频都会落盘，附 manifest.json）
+python3 engine/vault.py export-media "群名或联系人" --out ~/Desktop/媒体 --start 2026-07-01 --end 2026-07-31
+
+# 2) 用读图工具（Claude Code 的 Read、或任意能看图的工具）读导出目录里的 .jpg —— 你就能看见画面
+```
+
+也可在代码里调 `vault.export_media(username, out_dir, start_ts, end_ts)`，返回 `saved` 统计。
+
+**别说成"图片一律不可见"，更别编造画面。** 缩略图（约 180px、十几 KB）**是真图、能正常打开**，只是小——看得清就描述，看不清就明说"这个分辨率看不清"，不要猜细节写死。
+
+**只拿到缩略图时，原因看这两个细分计数，不许自己猜：**
+- `saved.thumb_hd_is_wxgf` → 高清**已经下载了**，但是 wxgf 腾讯私有编码，本地无法解码（硬限制，**点开也没用，别建议用户去点**）。
+- `saved.thumb_hd_missing` → 本地确实没有高清文件（可建议：去软件里点开那张图，稍等片刻后重新导出）。
+- `saved.undecodable` → 连缩略图都无法解码。
+
+> 🚫 **严禁由"只有缩略图"反推"用户没点开过"**——实测证伪：用户点开了、软件也确实把高清下下来了，但那份高清是 wxgf 编码解不开，于是仍然只有缩略图可用。照这条错推断，会给出既冤枉人又无效的建议。
+
 ## 分析时的注意点（防踩坑）
 
 见 `docs/03-分析防踩坑.md`：说话人以标注为准别自由复述、引用/@ 是确定信息别臆断指向、

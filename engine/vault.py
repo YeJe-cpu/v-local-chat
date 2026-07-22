@@ -401,8 +401,22 @@ def _row_to_message(row, chat, contacts, name2id, roster):
     }
 
 
-def get_chat_history(username, start_ts=None, end_ts=None, limit=2000, resolve_media=True):
-    """读取某会话某时间段的消息，含我们原创的引用/@/花名册/表情加工。"""
+_DEFAULT_LIMIT = object()  # 区分"没传 limit"和"显式传了数字"
+
+
+def get_chat_history(username, start_ts=None, end_ts=None, limit=_DEFAULT_LIMIT,
+                     resolve_media=True):
+    """读取某会话某时间段的消息，含我们原创的引用/@/花名册/表情加工。
+
+    limit 语义（踩过坑，别改回去）：**给了时间范围就默认取全量**——否则用户拉一整月
+    却被默认条数悄悄截断，会误以为"这天数据没了"。只有完全不给时间范围时才兜底截断，
+    且截**最近的**而不是最老的。显式传数字则以显式为准。
+    """
+    if limit is _DEFAULT_LIMIT:
+        limit = None if (start_ts is not None or end_ts is not None) else 2000
+        _tail = limit is not None  # 无时间范围的兜底：要最近的
+    else:
+        _tail = False
     contacts, aliases = load_contacts(DECRYPTED_DIR)
     chat = {"username": username, "display_name": contacts.get(username, username),
             "is_group": "@chatroom" in username}
@@ -431,9 +445,11 @@ def get_chat_history(username, start_ts=None, end_ts=None, limit=2000, resolve_m
             for r in con.execute(sql, params):
                 rows.append(_row_to_message(r, chat, contacts, name2id, roster))
     rows.sort(key=lambda m: (m["timestamp"], str(m["local_id"])))
+    if limit:
+        rows = rows[-limit:] if _tail else rows[:limit]
     if resolve_media:
-        enrich_media(username, rows[:limit] if limit else rows)
-    return rows[:limit] if limit else rows
+        enrich_media(username, rows)
+    return rows
 
 
 def search_contacts(query, decrypted_dir=None):
@@ -597,6 +613,25 @@ def find_image_file(username, ts, file_hash=None, prefer_thumb=False):
     return (thumb, "thumb") if thumb.exists() else (None, "none")
 
 
+def hd_absence_reason(thumb_path):
+    """只拿到缩略图时，说明高清究竟为什么没用上：wxgf / missing / other。
+
+    切勿由“只有缩略图”反推“用户没点开过”——实测不成立：用户点开后微信确实会下载高清，
+    但新版下载的高清可能是 wxgf 私有编码、本地无法解码，于是仍然只能退回缩略图。
+      wxgf    -> 高清已下载，但私有编码本地无解（点开也没用）
+      missing -> 本地根本没有高清文件（可能未点开，或尚未下载完）
+    """
+    name = str(thumb_path)
+    if not name.endswith("_t.dat"):
+        return "unknown"
+    stem = name[: -len("_t.dat")]
+    for suf in ("_h.dat", ".dat"):
+        c = Path(stem + suf)
+        if c.exists():
+            return "wxgf" if _dat_kind(c) == "wxgf" else "other"
+    return "missing"
+
+
 def find_video_file(username, ts, file_hash=None):
     if not WECHAT_DATA_DIR or not file_hash:
         return None, None
@@ -637,3 +672,127 @@ def enrich_media(username, messages):
             mp4, cover = find_video_file(username, m["timestamp"], file_hash=h)
             m["video_path"], m["video_cover"] = (str(mp4) if mp4 else None), (str(cover) if cover else None)
 
+
+
+# ---------------------------------------------------------------------------
+# 媒体导出：把加密的 .dat 解密成真实 .jpg/.png/.mp4 落盘。
+# 这是"让 AI 真正看到图片"的唯一通路——图片在本地是加密缓存，
+# 直接读 image_path 只会拿到乱码；必须先导出，再用读图工具读导出的 .jpg。
+# ---------------------------------------------------------------------------
+
+def _safe_name(text, limit=20):
+    return re.sub(r"[^\w一-鿿-]", "_", str(text or "unknown"))[:limit]
+
+
+def export_media(username, out_dir, start_ts=None, end_ts=None, limit=None):
+    """导出某会话某时间段的图片/视频到目录，返回统计与清单。
+
+    返回 dict：{"output_dir", "saved": {...}, "manifest": [...]}
+    saved.image_thumb = 只有 180px 缩略图（用户没在软件里点开过那张图）
+    saved.undecodable = wxgf 腾讯私有编码，本地无法解码（硬限制，非 bug）
+    """
+    import json
+
+    if not image_ready():
+        missing = []
+        if not AES:
+            missing.append("pycryptodome 未安装（pip3 install pycryptodome）")
+        if not WECHAT_DATA_DIR:
+            missing.append("找不到本机聊天软件的附件目录")
+        if not IMAGE_AES_KEY:
+            missing.append("无法推导图片密钥")
+        raise RuntimeError("媒体导出不可用: " + "; ".join(missing))
+
+    out = Path(out_dir).expanduser()
+    out.mkdir(parents=True, exist_ok=True)
+    rows = get_chat_history(username, start_ts, end_ts, limit=limit, resolve_media=True)
+
+    saved = {"image_hd": 0, "image_thumb": 0, "image_none": 0,
+             "video": 0, "video_none": 0, "undecodable": 0,
+             "thumb_hd_is_wxgf": 0, "thumb_hd_missing": 0}
+    manifest = []
+    for msg in rows:
+        base, _ = split_msg_type(msg.get("local_type"))
+        stamp = datetime.fromtimestamp(msg["timestamp"]).strftime("%Y%m%d-%H%M%S")
+        who = _safe_name(msg.get("sender"))
+        if base == 3:
+            path = msg.get("image_path")
+            if not path:
+                saved["image_none"] += 1
+                continue
+            data, ext = image_bytes(path)
+            if not data:
+                saved["undecodable"] += 1
+                continue
+            name = f"{stamp}_{who}_{msg.get('local_id')}.{ext}"
+            (out / name).write_bytes(data)
+            reason = ""
+            if msg.get("image_quality") == "hd":
+                saved["image_hd"] += 1
+            else:
+                saved["image_thumb"] += 1
+                reason = hd_absence_reason(path)
+                if reason == "wxgf":
+                    saved["thumb_hd_is_wxgf"] += 1
+                elif reason == "missing":
+                    saved["thumb_hd_missing"] += 1
+            manifest.append({"file": name, "time": msg.get("time"), "type": "image",
+                             "sender": msg.get("sender"), "quality": msg.get("image_quality"),
+                             "hd_absence": reason})
+        elif base == 43:
+            mp4 = msg.get("video_path")
+            if not mp4:
+                saved["video_none"] += 1
+                continue
+            name = f"{stamp}_{who}_{msg.get('local_id')}.mp4"
+            (out / name).write_bytes(Path(mp4).read_bytes())
+            saved["video"] += 1
+            manifest.append({"file": name, "time": msg.get("time"),
+                             "type": "video", "sender": msg.get("sender")})
+
+    (out / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"output_dir": str(out), "saved": saved, "manifest": manifest}
+
+
+def _parse_day(text, end_of_day=False):
+    if not text:
+        return None
+    d = datetime.strptime(text[:10], "%Y-%m-%d")
+    if end_of_day:
+        d = d.replace(hour=23, minute=59, second=59)
+    return int(d.timestamp())
+
+
+if __name__ == "__main__":
+    import argparse
+    import json as _json
+
+    ap = argparse.ArgumentParser(description="v-local-chat 引擎命令行")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    ph = sub.add_parser("history", help="导出会话消息（JSON）")
+    ph.add_argument("chat", help="联系人/群名 或 username")
+    ph.add_argument("--start", help="开始日期 YYYY-MM-DD")
+    ph.add_argument("--end", help="结束日期 YYYY-MM-DD")
+    ph.add_argument("--limit", type=int, default=None, help="条数上限，默认不限")
+
+    pm = sub.add_parser("export-media", help="把图片/视频解密导出成真实文件")
+    pm.add_argument("chat", help="联系人/群名 或 username")
+    pm.add_argument("--out", required=True, help="导出目录")
+    pm.add_argument("--start", help="开始日期 YYYY-MM-DD")
+    pm.add_argument("--end", help="结束日期 YYYY-MM-DD")
+    pm.add_argument("--limit", type=int, default=None)
+
+    a = ap.parse_args()
+    s, e = _parse_day(getattr(a, "start", None)), _parse_day(getattr(a, "end", None), True)
+    if a.cmd == "history":
+        print(_json.dumps(get_chat_history(a.chat, s, e, limit=a.limit),
+                          ensure_ascii=False, indent=2))
+    else:
+        r = export_media(a.chat, a.out, s, e, a.limit)
+        v = r["saved"]
+        print(f"导出到: {r['output_dir']}\n"
+              f"高清图 {v['image_hd']} | 缩略图 {v['image_thumb']} | 视频 {v['video']} | "
+              f"无本地文件 {v['image_none'] + v['video_none']} | wxgf无法解码 {v['undecodable']}\n"
+              f"提示：要“看”图，用读图工具直接读导出目录里的 .jpg 文件。")
