@@ -431,6 +431,15 @@ def resolve_chat_username(query, decrypted_dir=None):
     # 原始 id 直接用
     if q.endswith("@chatroom") or q.startswith(("wxid_", "gh_")):
         return q
+    # 已经是有效 username 就直接用，不要当"名字"去解析——否则合法的系统账号
+    # （notifymessage/qqtech 等无标准前缀的 username）会被误判成"找不到"而报错。
+    # ① 能直接定位到会话表 → 一定是有效 username；
+    # ② 或它本身就是联系人表里的 username（哪怕没聊过，返回空才是诚实答案，不该报错）。
+    if _has_message_table(q, decrypted_dir):
+        return q
+    contacts, _ = load_contacts(decrypted_dir or DECRYPTED_DIR)
+    if q in contacts:
+        return q
     cands = search_contacts(q, decrypted_dir)
     if not cands:
         raise ValueError(f"找不到会话: {q}（请用群名/备注名/昵称，或直接用 username）")
