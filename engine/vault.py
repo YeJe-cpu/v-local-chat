@@ -404,6 +404,50 @@ def _row_to_message(row, chat, contacts, name2id, roster):
 _DEFAULT_LIMIT = object()  # 区分"没传 limit"和"显式传了数字"
 
 
+def _has_message_table(username, decrypted_dir=None):
+    """该 username 在任一 message 库里是否真的有会话表。"""
+    d = decrypted_dir or DECRYPTED_DIR
+    target = message_table(username)
+    for db in message_dbs(d):
+        try:
+            with connect(db) as con:
+                if table_exists(con, target):
+                    return True
+        except sqlite3.Error:
+            continue
+    return False
+
+
+def resolve_chat_username(query, decrypted_dir=None):
+    """把"群名/备注名/昵称"解析成真实 username（wxid_xxx / xxx@chatroom）。
+
+    为什么必须有这一步：会话表名是 md5(username)。若直接把人类可读的名字传进去，
+    算出的表名根本不存在，于是**静默返回 0 条**——用户会以为"这个群没有消息"，
+    实际是没找到会话。这类静默空结果比报错危险得多，所以这里找不到就明确抛错。
+    """
+    if not query or not str(query).strip():
+        raise ValueError("会话名不能为空")
+    q = str(query).strip()
+    # 原始 id 直接用
+    if q.endswith("@chatroom") or q.startswith(("wxid_", "gh_")):
+        return q
+    cands = search_contacts(q, decrypted_dir)
+    if not cands:
+        raise ValueError(f"找不到会话: {q}（请用群名/备注名/昵称，或直接用 username）")
+    # 优先：显示名完全相同；其次：确实存在会话表的候选
+    exact = [c for c in cands if c["display"].strip().lower() == q.lower()]
+    pool = exact or cands
+    with_table = [c for c in pool if _has_message_table(c["username"], decrypted_dir)]
+    if len(with_table) == 1:
+        return with_table[0]["username"]
+    if not with_table:
+        raise ValueError(
+            f"找到联系人「{pool[0]['display']}」但本地没有它的聊天记录表"
+            f"（可能从未聊过，或该库未解密）")
+    names = "、".join(f"{c['display']}({c['username']})" for c in with_table[:5])
+    raise ValueError(f"「{q}」匹配到多个会话，请写得更精确或直接用 username：{names}")
+
+
 def get_chat_history(username, start_ts=None, end_ts=None, limit=_DEFAULT_LIMIT,
                      resolve_media=True):
     """读取某会话某时间段的消息，含我们原创的引用/@/花名册/表情加工。
@@ -417,6 +461,9 @@ def get_chat_history(username, start_ts=None, end_ts=None, limit=_DEFAULT_LIMIT,
         _tail = limit is not None  # 无时间范围的兜底：要最近的
     else:
         _tail = False
+    # 允许传"群名/备注名/昵称"：不解析成真实 username 就会算出不存在的表名、
+    # 静默返回 0 条（SKILL.md 里承诺的就是"联系人或群名/username"都能用）。
+    username = resolve_chat_username(username)
     contacts, aliases = load_contacts(DECRYPTED_DIR)
     chat = {"username": username, "display_name": contacts.get(username, username),
             "is_group": "@chatroom" in username}
@@ -725,8 +772,13 @@ def export_media(username, out_dir, start_ts=None, end_ts=None, limit=None):
     """导出某会话某时间段的图片/视频到目录，返回统计与清单。
 
     返回 dict：{"output_dir", "saved": {...}, "manifest": [...]}
-    saved.image_thumb = 只有 180px 缩略图（用户没在软件里点开过那张图）
-    saved.undecodable = wxgf 腾讯私有编码，本地无法解码（硬限制，非 bug）
+    saved.image_thumb       = 只导出到 180px 缩略图（缩略图是真图、能打开，只是小）
+    saved.thumb_hd_is_wxgf  = 高清**已下载**但是 wxgf 私有编码，本地无法解码（点开也没用）
+    saved.thumb_hd_missing  = 本地确实没有高清文件（可建议去软件里点开后重跑）
+    saved.undecodable       = 连缩略图都无法解码
+
+    ⚠️ 严禁由"只有缩略图"反推"用户没点开过"——实测证伪：点开了、高清也下载了，
+    但那份高清是 wxgf 编码解不开，于是仍然只能退回缩略图。原因只看上面两个细分计数。
     """
     import json
 
@@ -829,7 +881,15 @@ if __name__ == "__main__":
     else:
         r = export_media(a.chat, a.out, s, e, a.limit)
         v = r["saved"]
-        print(f"导出到: {r['output_dir']}\n"
-              f"高清图 {v['image_hd']} | 缩略图 {v['image_thumb']} | 视频 {v['video']} | "
-              f"无本地文件 {v['image_none'] + v['video_none']} | wxgf无法解码 {v['undecodable']}\n"
-              f"提示：要“看”图，用读图工具直接读导出目录里的 .jpg 文件。")
+        out_lines = [f"导出到: {r['output_dir']}",
+                     f"高清图 {v['image_hd']} | 缩略图 {v['image_thumb']} | 视频 {v['video']} | "
+                     f"无本地文件 {v['image_none'] + v['video_none']} | 完全无法解码 {v['undecodable']}"]
+        # 只拿到缩略图时，说清是哪种原因——否则调用方会瞎猜成"你没点开过"（实测该推断不成立）
+        if v.get("thumb_hd_is_wxgf"):
+            out_lines.append(f"  其中 {v['thumb_hd_is_wxgf']} 张的高清已下载、但是 wxgf 私有编码，"
+                             f"本地无法解码（点开也没用，这是软件的编码机制）")
+        if v.get("thumb_hd_missing"):
+            out_lines.append(f"  其中 {v['thumb_hd_missing']} 张本地没有高清文件"
+                             f"（在软件里点开看一下、稍等片刻后重跑本命令可能补上）")
+        out_lines.append("提示：要“看”图，用读图工具直接读导出目录里的 .jpg 文件。")
+        print("\n".join(out_lines))
