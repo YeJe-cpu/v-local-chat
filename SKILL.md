@@ -43,6 +43,8 @@ msgs = vault.get_chat_history("联系人或群名/username", start_ts, end_ts, l
 # 每条消息带：sender、content(表情已归一化)、reply_to{to_name,quoted}、mentions[]、image_path/video_path
 ```
 
+> **⚠️ 用结构化数据，别把消息渲染成文本再按行过滤。** `get_chat_history` 返回的每条消息是一个独立对象，`content` 可能含内部换行（用户爱写多段长消息）。若你把它拼成"一行一条"的文本，再用 `grep '^\['`、`head`、`tail`、`awk` 按行清理，会**只留每条首行、静默丢弃续行**，据此下"某事没提过"的错误结论。直接遍历对象、按 `sender`/`reply_to`/`mentions` 字段取值即可，不必切文本。引擎 CLI（`python3 engine/vault.py history …`）本就输出 JSON，天然抗行过滤。
+
 ## AI 想"看到"图片画面，就这两步
 
 图片在本地是**加密缓存**：`get_chat_history` 给的 `image_path` 是加密的 `.dat`，**直接读它只会是乱码，别读**。
