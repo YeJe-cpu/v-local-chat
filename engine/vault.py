@@ -318,7 +318,8 @@ def annotate_content(msg):
 
 
 # ---------------- 内容格式化 + 消息读取 ----------------
-_XML_MSG_RE = re.compile(r"<\?xml|<msg[>\s/]|<appmsg[>\s/]|<sysmsg[>\s/]|<voipmsg|<voicemsg|<emoji[>\s/]")
+# 只匹配真卡片强信号（不含裸 <msg>，避免误吃用户打的 <msg> 文本）
+_XML_MSG_RE = re.compile(r"<\?xml|<appmsg[>\s/]|<sysmsg[>\s/]|<voipmsg|<voicemsg|<emoji[>\s/]|<img\s|<recordinfo")
 
 
 def strip_group_prefix(s):
