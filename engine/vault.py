@@ -258,12 +258,14 @@ def parse_reply(local_type, content, contacts, roster=None):
         rtype = int(refer_type) if refer_type is not None else None
     except (TypeError, ValueError):
         rtype = None
+    quoted = strip_group_prefix(quoted)
     if "<appmsg" in quoted or "&lt;appmsg" in quoted:
         inner = html.unescape(quoted) if "&lt;" in quoted else quoted
         quoted = format_content(49, inner)
     elif rtype is not None and rtype != 1:
         quoted = type_label(rtype)
-    if quoted.startswith("<"):
+    quoted = xml_to_clean(quoted)
+    if quoted.strip().startswith(("<", "&lt;")):
         quoted = "[非文本内容]"
     return {"to_name": to_name, "quoted": normalize_emoji(quoted)}
 
@@ -300,10 +302,10 @@ def build_group_roster(decrypted_dir, username):
 
 def annotate_content(msg):
     """给扁平文本/Markdown 场景加回应锚点（面板用结构化字段自渲染，不用这个）。"""
-    text = msg.get("content") or ""
+    text = xml_to_clean(msg.get("content") or "")
     r = msg.get("reply_to")
     if r:
-        q = r.get("quoted") or ""
+        q = xml_to_clean(r.get("quoted") or "")
         if len(q) > 40:
             q = q[:40] + "…"
         text = f"[回复 {r.get('to_name') or '某人'}「{q}」] {text}".strip()
@@ -316,6 +318,32 @@ def annotate_content(msg):
 
 
 # ---------------- 内容格式化 + 消息读取 ----------------
+_XML_MSG_RE = re.compile(r"<\?xml|<msg[>\s/]|<appmsg[>\s/]|<sysmsg[>\s/]|<voipmsg|<voicemsg|<emoji[>\s/]")
+
+
+def strip_group_prefix(s):
+    """剥掉群消息里 `wxid_xxx:\\n` 发送人前缀（引用原文/被嵌套内容常带，会让 XML 解析失败）。"""
+    return re.sub(r"^[\w\-@.]{1,64}:\n", "", s or "", count=1)
+
+
+def xml_to_clean(text):
+    """把残留的结构化消息 XML（appmsg/图文/系统/语音卡片）收敛成干净文本，绝不吐原始 XML。
+
+    否则 `history --format text` 会吐一整段 XML，逼下游按行 grep/head 清噪音、进而截断消息。
+    能抽 <title> 就抽，抽不到给干净标签；只处理明确结构化标签，不误伤正文里偶发的 `<`。"""
+    if not text or ("<" not in text and "&lt;" not in text):
+        return text
+    raw = html.unescape(text) if "&lt;" in text else text
+    if not _XML_MSG_RE.search(raw):
+        return text
+    m = re.search(r"<title>(.*?)</title>", raw, re.S)
+    if m and m.group(1).strip():
+        return normalize_emoji(m.group(1).strip())
+    if "<voicemsg" in raw or "<voipmsg" in raw:
+        return "[语音/通话]"
+    return "[卡片消息]"
+
+
 def format_content(local_type, content):
     base, sub = split_msg_type(local_type)
     if base == 3:
@@ -334,6 +362,7 @@ def format_content(local_type, content):
     if base == 50:
         return "[通话]"
     if base == 49:
+        content = strip_group_prefix(content)  # 群 appmsg 常带发送人前缀，会让解析失败
         try:
             root = ET.fromstring(content)
             app_type = int(root.findtext(".//type") or 0)
@@ -349,7 +378,11 @@ def format_content(local_type, content):
                 return f"[文件] {title or des}".strip()
             return f"[链接/文件] {title or des}".strip()
         except Exception:
-            return content.strip() or "[链接/文件]"
+            cleaned = xml_to_clean(content)
+            if not _XML_MSG_RE.search(cleaned):
+                return cleaned or "[链接/文件]"
+            t = re.search(r"<title>(.*?)</title>", html.unescape(content), re.S)
+            return (normalize_emoji(t.group(1).strip()) if t and t.group(1).strip() else "[链接/文件]")
     if base == 10000:
         # 系统消息：带 XML 标签的（群公告 ChatRoomTopMsgResponse / 撤回 / 拍一拍等）给干净标签，
         # 别把原始 XML 吐到界面；纯文本的（"X邀请Y加入了群聊"）保留原文。
