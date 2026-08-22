@@ -345,6 +345,35 @@ def xml_to_clean(text):
     return "[卡片消息]"
 
 
+def expand_merged_forward(content, max_items=40):
+    """展开合并转发的聊天记录（appmsg type 19）：嵌套 datalist 逐条抽成可读文本。
+    完整内容（发言人+时间+每条正文）就在本地库 recordinfo/datalist 里，不展开只剩一个标签、
+    整段对话白白丢掉。少数没有 datalist 的（内容在单独文件、未下载）才真展不开，如实标注。"""
+    raw = html.unescape(content) if "&lt;" in content else content
+    tm = re.search(r"<title>(.*?)</title>", raw, re.S)
+    title = tm.group(1).strip() if tm else "聊天记录"
+    items = re.findall(r"<dataitem\b.*?</dataitem>", raw, re.S)
+    if not items:
+        return f"[合并转发·{title}]（本地无展开内容，可能未下载）"
+    tmap = {"1": "", "2": "[图片]", "4": "[视频]", "5": "[链接]", "6": "[位置]", "8": "[文件]", "34": "[语音]"}
+    lines = [f"[合并转发·{len(items)}条·{title}]"]
+    for it in items[:max_items]:
+        sn = re.search(r"<sourcename>(.*?)</sourcename>", it, re.S)
+        st = re.search(r"<sourcetime>(.*?)</sourcetime>", it, re.S)
+        dd = re.search(r"<datadesc>(.*?)</datadesc>", it, re.S) or re.search(r"<datatitle>(.*?)</datatitle>", it, re.S)
+        dtype = re.search(r'datatype="?(\d+)', it) or re.search(r"<datatype>(\d+)", it)
+        who = html.unescape(sn.group(1).strip()) if sn else "?"
+        when = html.unescape(st.group(1).strip()) if st else ""
+        if dd and dd.group(1).strip():
+            body = normalize_emoji(html.unescape(dd.group(1).strip())).replace("\n", " ")
+        else:
+            body = tmap.get(dtype.group(1) if dtype else "", "[非文本]")
+        lines.append(f"  · {when} {who}: {body}".rstrip())
+    if len(items) > max_items:
+        lines.append(f"  …还有 {len(items) - max_items} 条（超出展开上限）")
+    return "\n".join(lines)
+
+
 def format_content(local_type, content):
     base, sub = split_msg_type(local_type)
     if base == 3:
@@ -371,6 +400,8 @@ def format_content(local_type, content):
             des = (root.findtext(".//des") or "").strip()
             if app_type == 57:
                 return normalize_emoji((title or des).strip()) or "[引用回复]"
+            if app_type == 19 or "<recordinfo>" in content or "<datalist" in content:
+                return expand_merged_forward(content)
             if app_type == 5:
                 return f"[链接] {title or des}".strip()
             if app_type in (33, 36, 44):
